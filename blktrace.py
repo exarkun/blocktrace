@@ -1,5 +1,6 @@
 from fcntl import ioctl
 from sys import argv
+from errno import ENOENT
 
 from cffi import FFI
 
@@ -44,7 +45,23 @@ struct blk_user_trace_setup {
     setup[0].buf_nr = 16
     setup[0].act_mask = lib.BLK_TC_WRITE
     with open(name, "rb") as device:
-        print 'ioctl', ioctl(device.fileno(), lib.BLKTRACESETUP, ffi.buffer(setup))
+        while True:
+            try:
+                result = ioctl(device.fileno(), lib.BLKTRACESETUP, ffi.buffer(setup))
+            except IOError as e:
+                if e.errno == ENOENT:
+                    print("Tearing down existing trace...")
+                    ioctl(device.fileno(), lib.BLKTRACETEARDOWN)
+                    continue
+                raise
+            else:
+                name = ffi.buffer(setup[0].name)[:].rstrip(b"\x00")
+                print("ioctl", result, name)
+                break
+
+        with open(b"/sys/kernel/debug/block/" + name + b"/trace0", "rb") as trace:
+            while True:
+                print repr(trace.read(1024))
 
     # TODO better TEARDOWN the trace someday!  Doesn't seem to work well to
     # leave it SETUP.
